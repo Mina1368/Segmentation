@@ -1,0 +1,60 @@
+require 'nn'
+require 'cunn'
+require 'cutorch'
+require 'cudnn'
+require 'image'
+require 'torch'
+
+model = torch.load('model-fusion.net')
+
+local function Rescale(img)
+m= img:min()
+M = img:max()
+img = (img-m)/(M-m)
+return img
+end
+
+h = 360
+w = 480
+t = 29
+
+seg = image.load('outputSeg' .. t .. '.png')
+edge = image.load('outputEdge' .. t .. '.png')
+i = seg:size(2)
+j = seg:size(3)
+img = torch.DoubleTensor(3,i,j)
+img[{1,{},{}}] = seg
+img[{2,{},{}}] = seg
+img[{3,{},{}}] = edge
+
+k = img:size(1)
+
+-- zeropadding the image
+
+r1 = torch.ceil(i/h);
+r2 = torch.ceil(j/w);
+
+input = torch.DoubleTensor(k,r1*h,r2*w)
+out = torch.DoubleTensor(r1*h,r2*w)
+input[{{},{1,i},{1,j}}] = img
+
+-- sliding window
+for n = 1,r1*h, h do
+for m = 1,r2*w,w do
+input1 = input[{{},{n,n+h-1},{m,m+w-1}}]
+x = torch.Tensor(1, 3, h, w)
+x[{1,{},{},{}}] = input1[{{},{1,h},{1,w}}]
+model:evaluate()
+x = x:cuda()
+y = model:forward(x)
+out1 = torch.DoubleTensor(2,h,w):copy(torch.squeeze(y[{1,{},{},{}}]))
+_,o1 = out1:max(1)
+output1 = torch.squeeze(o1)
+output1 = Rescale(output1)
+out[{{n,n+h-1},{m,m+w-1}}]=output1
+end
+end
+
+o = out[{{1,i},{1,j}}]
+image.save('outputFusion' .. t .. '.png', o)
+
